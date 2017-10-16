@@ -15,5 +15,5 @@ install: all
 
 test: all
 	util/lua-releng
-	cp lib/resty/*.lua $(OPENRESTY_PREFIX)/lualib/resty
+	sudo cp lib/resty/*.lua $(OPENRESTY_PREFIX)/lualib/resty
 	PATH=$(OPENRESTY_PREFIX)/nginx/sbin:$$PATH prove -I../test-nginx/lib -r -v t/
