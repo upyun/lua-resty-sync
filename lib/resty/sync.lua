@@ -272,6 +272,11 @@ function _M.start(self)
     local LOCK_KEY = self.LOCK_KEY
     local LOCK_TIMER_KEY = self.LOCK_TIMER_KEY
     local id = worker_id()
+    if not is_num(id) then
+        -- cache loader process and privileged_agent also will run
+        -- the "init_worker_by_lua*" hooks, so let's just reject them.
+        return true
+    end
 
     local function wrapper_event(premature)
         if premature then
