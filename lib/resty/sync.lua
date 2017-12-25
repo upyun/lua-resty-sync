@@ -169,26 +169,28 @@ function _M.get_version(self, tag)
     end
 
     local id = self.tags[tag]
-
-    if self.owner == true then
-        if is_null(self.tasks[id].version) then
-            return nil, "no data"
-        end
-
-        return self.tasks[id].version
-    end
+    local task = self.tasks[id]
 
     local shm = ngx_shared[self.shm]
-    local version, err = shm:get(self.tasks[id].shm_version_key)
+    local shm_version = shm:get(task.shm_version_key)
+
+    if shm_version == task.version then
+        return task.version
+    end
+
+    local data, err = shm:get(task.shm_data_key)
     if err then
         return nil, err
     end
 
-    if is_null(version) then
+    if is_null(data) then
         return nil, "no data"
     end
 
-    return version
+    task.version = version
+    task.data = data
+
+    return task.version
 end
 
 
@@ -202,17 +204,16 @@ function _M.get_data(self, tag)
     end
 
     local id = self.tags[tag]
-
-    if self.owner == true then
-        if is_null(self.tasks[id].data) then
-            return nil, "no data"
-        end
-
-        return self.tasks[id].data
-    end
+    local task = self.tasks[id]
 
     local shm = ngx_shared[self.shm]
-    local data, err = shm:get(self.tasks[id].shm_data_key)
+    local shm_version = shm:get(task.shm_version_key)
+
+    if shm_version == task.version then
+        return task.data
+    end
+
+    local data, err = shm:get(task.shm_data_key)
     if err then
         return nil, err
     end
@@ -221,7 +222,10 @@ function _M.get_data(self, tag)
         return nil, "no data"
     end
 
-    return data
+    task.version = version
+    task.data = data
+
+    return task.data
 end
 
 
@@ -235,17 +239,10 @@ function _M.get_last_modified_time(self, tag)
     end
 
     local id = self.tags[tag]
-
-    if self.owner == true then
-        if is_null(self.tasks[id].last_modified) then
-            return nil, "no data"
-        end
-
-        return self.tasks[id].last_modified
-    end
+    local task = self.tasks[id]
 
     local shm = ngx_shared[self.shm]
-    local time, err = shm:get(self.tasks[id].shm_time_key)
+    local time, err = shm:get(task.shm_time_key)
     if err then
         return nil, err
     end
@@ -324,8 +321,6 @@ function _M.start(self)
         return true
     end
 
-    self.owner = true
-
     run(self)
 
     local timer_method
@@ -378,6 +373,11 @@ function _M.register(self, callback, tag)
     table_insert(self.tasks, {
         tag             = tag,
         callback        = callback,
+
+        version         = nil,
+        data            = nil,
+        last_modified   = nil,
+
         shm_data_key    = "_data_" .. tag,
         shm_version_key = "_version_" .. tag,
         shm_time_key    = "_time_" .. tag,
