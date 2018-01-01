@@ -67,7 +67,7 @@ end
 
 local function get_lock(key)
     local phase   = get_phase()
-    local timeout = phase == INIT_WORKER and 0 or nil
+    local timeout = (phase == INIT_WORKER and 0 or nil)
 
     -- ngx.sleep API(called by lock:lock) is disabled in phase init_worker, so
     -- just set wait timeout to 0(return immediately)
@@ -153,7 +153,7 @@ local function run(self)
            ", owner worker pid: ", worker_pid())
 
     local tasks = self.tasks
-    for id, v in ipairs(tasks) do
+    for _, v in ipairs(tasks) do
         work(self, v)
     end
 end
@@ -172,22 +172,22 @@ function _M.get_version(self, tag)
     local task = self.tasks[id]
 
     local shm = ngx_shared[self.shm]
-    local shm_version = shm:get(task.shm_version_key)
+    local shm_version, err = shm:get(task.shm_version_key)
+    if is_null(shm_version) then
+        return nil, "no version" .. err
+    end
 
     if shm_version == task.version then
         return task.version
     end
 
+    -- update data 
     local data, err = shm:get(task.shm_data_key)
-    if err then
-        return nil, err
-    end
-
     if is_null(data) then
-        return nil, "no data"
+        return nil, "no data" .. err
     end
 
-    task.version = version
+    task.version = shm_version
     task.data = data
 
     return task.version
@@ -208,24 +208,25 @@ function _M.get_data(self, tag)
 
     local shm = ngx_shared[self.shm]
     local shm_version = shm:get(task.shm_version_key)
+    if is_null(shm_version) then
+        return nil, "no version" .. err
+    end
 
+    -- equal version, no need fetch from shdict
     if shm_version == task.version then
         return task.data
     end
 
     local data, err = shm:get(task.shm_data_key)
-    if err then
-        return nil, err
-    end
-
     if is_null(data) then
-        return nil, "no data"
+        return nil, "no data" .. err
     end
 
-    task.version = version
+    task.version = shm_version
     task.data = data
 
-    return task.data
+    return data
+
 end
 
 
@@ -239,10 +240,17 @@ function _M.get_last_modified_time(self, tag)
     end
 
     local id = self.tags[tag]
-    local task = self.tasks[id]
+
+    if self.owner == true then
+        if is_null(self.tasks[id].last_modified) then
+            return nil, "no data"
+        end
+
+        return self.tasks[id].last_modified
+    end
 
     local shm = ngx_shared[self.shm]
-    local time, err = shm:get(task.shm_time_key)
+    local time, err = shm:get(self.tasks[id].shm_time_key)
     if err then
         return nil, err
     end
@@ -318,8 +326,13 @@ function _M.start(self)
     val = shm:get(LOCK_TIMER_KEY)
 
     if val and val ~= id then
+        if lock then 
+            release_lock(lock) 
+        end
         return true
     end
+
+    self.owner = true
 
     run(self)
 
@@ -373,11 +386,6 @@ function _M.register(self, callback, tag)
     table_insert(self.tasks, {
         tag             = tag,
         callback        = callback,
-
-        version         = nil,
-        data            = nil,
-        last_modified   = nil,
-
         shm_data_key    = "_data_" .. tag,
         shm_version_key = "_version_" .. tag,
         shm_time_key    = "_time_" .. tag,
