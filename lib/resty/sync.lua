@@ -173,8 +173,12 @@ function _M.get_version(self, tag)
 
     local shm = ngx_shared[self.shm]
     local shm_version, err = shm:get(task.shm_version_key)
+    if err then
+        return nil, err
+    end
+
     if is_null(shm_version) then
-        return nil, "no version" .. err
+        return nil, "no version"
     end
 
     if shm_version == task.version then
@@ -183,8 +187,11 @@ function _M.get_version(self, tag)
 
     -- update data 
     local data, err = shm:get(task.shm_data_key)
+    if err then
+        return nil, err
+    end
     if is_null(data) then
-        return nil, "no data" .. err
+        return nil, "no data"
     end
 
     task.version = shm_version
@@ -207,9 +214,12 @@ function _M.get_data(self, tag)
     local task = self.tasks[id]
 
     local shm = ngx_shared[self.shm]
-    local shm_version = shm:get(task.shm_version_key)
+    local shm_version, err = shm:get(task.shm_version_key)
+    if err then
+        return nil, err
+    end
     if is_null(shm_version) then
-        return nil, "no version" .. err
+        return nil, "no version"
     end
 
     -- equal version, no need fetch from shdict
@@ -218,8 +228,11 @@ function _M.get_data(self, tag)
     end
 
     local data, err = shm:get(task.shm_data_key)
+    if err then
+        return nil, err
+    end
     if is_null(data) then
-        return nil, "no data" .. err
+        return nil, "no data"
     end
 
     task.version = shm_version

@@ -1,2 +1,3 @@
 t/servroot/*
 go-test
+.*
