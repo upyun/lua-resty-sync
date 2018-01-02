@@ -67,7 +67,7 @@ end
 
 local function get_lock(key)
     local phase   = get_phase()
-    local timeout = phase == INIT_WORKER and 0 or nil
+    local timeout = (phase == INIT_WORKER and 0 or nil)
 
     -- ngx.sleep API(called by lock:lock) is disabled in phase init_worker, so
     -- just set wait timeout to 0(return immediately)
@@ -153,7 +153,7 @@ local function run(self)
            ", owner worker pid: ", worker_pid())
 
     local tasks = self.tasks
-    for id, v in ipairs(tasks) do
+    for _, v in ipairs(tasks) do
         work(self, v)
     end
 end
@@ -169,26 +169,35 @@ function _M.get_version(self, tag)
     end
 
     local id = self.tags[tag]
-
-    if self.owner == true then
-        if is_null(self.tasks[id].version) then
-            return nil, "no data"
-        end
-
-        return self.tasks[id].version
-    end
+    local task = self.tasks[id]
 
     local shm = ngx_shared[self.shm]
-    local version, err = shm:get(self.tasks[id].shm_version_key)
+    local shm_version, err = shm:get(task.shm_version_key)
     if err then
         return nil, err
     end
 
-    if is_null(version) then
+    if is_null(shm_version) then
+        return nil, "no version"
+    end
+
+    if shm_version == task.version then
+        return task.version
+    end
+
+    -- update data 
+    local data, err = shm:get(task.shm_data_key)
+    if err then
+        return nil, err
+    end
+    if is_null(data) then
         return nil, "no data"
     end
 
-    return version
+    task.version = shm_version
+    task.data = data
+
+    return task.version
 end
 
 
@@ -202,26 +211,35 @@ function _M.get_data(self, tag)
     end
 
     local id = self.tags[tag]
-
-    if self.owner == true then
-        if is_null(self.tasks[id].data) then
-            return nil, "no data"
-        end
-
-        return self.tasks[id].data
-    end
+    local task = self.tasks[id]
 
     local shm = ngx_shared[self.shm]
-    local data, err = shm:get(self.tasks[id].shm_data_key)
+    local shm_version, err = shm:get(task.shm_version_key)
     if err then
         return nil, err
     end
+    if is_null(shm_version) then
+        return nil, "no version"
+    end
 
+    -- equal version, no need fetch from shdict
+    if shm_version == task.version then
+        return task.data
+    end
+
+    local data, err = shm:get(task.shm_data_key)
+    if err then
+        return nil, err
+    end
     if is_null(data) then
         return nil, "no data"
     end
 
+    task.version = shm_version
+    task.data = data
+
     return data
+
 end
 
 
@@ -321,6 +339,9 @@ function _M.start(self)
     val = shm:get(LOCK_TIMER_KEY)
 
     if val and val ~= id then
+        if lock then 
+            release_lock(lock) 
+        end
         return true
     end
 
